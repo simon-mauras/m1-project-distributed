@@ -1,18 +1,22 @@
--module(agent_treap).
--export([node_init/0, init_seed/0, spawns/2,
-         ask_merge/2, ask_split/2, ask_job/4,
-         ask_root/1, ask_graph/2, ask_ping/1,
-         test/1]).
+-module(agent).
+-export([node_init/1, start/0]).
+
+% ================================ Utilities ================================= %
 
 -record(meta, {size, load}).
 -record(treap, {up, left, right,
                 meta, meta_left, meta_right,
                 jobs, job_token, value}).
 
--define(WAITING_TIME, 1000).
 -define(INFINITY, 1.0e10).
+-define(WAITING_TIME, 1000).
+
+init_seed() ->
+  random:seed(erlang:phash2([node(), self()]), 42, 42).
+  
 
 % ================================== Node ==================================== %
+
 % Update metadata (from a list of metadata, children)
 meta_update() -> #meta{ size = 1, load = 0 }.
 meta_update([]) -> meta_update();
@@ -23,6 +27,7 @@ meta_update([H|T]) ->
     size = Result#meta.size + H#meta.size
   }.
 
+% Update the load of a subtree
 meta_load(Meta, Nb) ->
   Meta#meta{ load = Meta#meta.load + Nb / Meta#meta.size }.
 
@@ -252,77 +257,19 @@ node_controller(Treap) ->
     { graph, Data } -> node_graph(Treap, Data);
     { split, Data } -> node_split(Treap, Data);
     { merge, Data } -> node_merge(Treap, Data);
-    { kill } -> io:fwrite("~w: I'm dead~n", [self()])
+    { kill } -> ok %io:fwrite("~w: I'm dead~n", [self()])
   end.
 
-node_init() ->
-  io:fwrite("~w: I'm alive~n", [self()]),
+node_init(JobToken) ->
+  %io:fwrite("~w: I'm alive~n", [self()]),
   init_seed(),
   node_controller(#treap{
     jobs = [],
-    job_token = 2,
+    job_token = JobToken,
     value = random:uniform(1 bsl 30),
     meta = meta_update()
   }).
 
-
-% ================================ Utilities ================================= %
-spawns(0, _) -> [];
-spawns(N, Fun) -> [spawn(Fun)|spawns(N-1,Fun)].
-
-init_seed() ->
-  random:seed(erlang:phash2([node(), self()]), 42, 42).
-
-% ================================== Test ==================================== %
-ask_merge(undefined, Pid) -> Pid;
-ask_merge(Pid, undefined) -> Pid;
-ask_merge(Pid1, Pid2) ->
-  Pid1 ! { merge, { left, Pid2, undefined, self() } },
-  Pid2 ! { merge, { right, Pid1, undefined, self() } },
-  receive { merge_end, Pid, _ } ->
-    %io:fwrite("Merge(~w,~w) = ~w~n", [Pid1, Pid2, Pid]),
-    Pid
-  end.
-
-ask_split(Pid, Threshold) ->
-  Pid ! { split, { Threshold, undefined, undefined, self() } },
-  receive { split_end, Pid1, Pid2, _, _ } ->
-    { Pid1, Pid2 }
-  end.
-
-ask_ping(Pid) -> Pid ! { ping }, ok.
-
-ask_graph(Pid, Filename) ->
-  { ok, File } = file:open(Filename, [write]),
-  io:fwrite(File, "digraph topology { ~n", []),
-  Pid ! { graph, { File, self() } },
-  receive { graph_end } -> ok after ?WAITING_TIME -> ok end,
-  io:fwrite(File, "}~n", []),
-  file:close(File).
-
-ask_root(Pid) ->
-  Pid ! { root, self() },
-  receive { root_end, Root } -> Root end.
-
-ask_job(Pid, Module, Function, Args) ->
-  Pid ! { job_new, { true, 1000, { Module, Function, Args, self() } } }.
-
 start() ->
-  register(client, self()),
-  node_init().
-
-test(N) ->
-  Pids = spawns(N, fun node_init/0),
-  Pid1 = lists:foldl(fun ask_merge/2, undefined, Pids),
-  ask_graph(Pid1, "graph1.dot"),
-  { Pid2, Pid3 } = ask_split(Pid1, N div 2),
-  ask_graph(Pid2, "graph2-1.dot"),
-  ask_graph(Pid3, "graph2-2.dot"),
-  Pid = ask_merge(Pid2, Pid3),
-  Args = lists:map(fun (_) -> [1000] end, lists:seq(1, 10*N)),
-  lists:map(fun (Arg) -> ask_job(Pid2, jobs, wait, Arg) end, Args),
-  ask_graph(Pid, "graph3.dot"),
-  lists:map(fun (_) -> receive ok -> ok end end, Args),
-  ask_graph(Pid, "graph4.dot"),
-  lists:map(fun (P) -> P ! { kill } end, Pids),
-  ok.
+  erlang:register(agent, self()),
+  node_init(1).
