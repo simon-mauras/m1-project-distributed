@@ -16,10 +16,10 @@ compile:
 agent: all
 	cd $(BIN_PATH) && \
 	erl -noshell -name $(NAME) -setcookie $(COOKIE) \
-		  -run agent -run init stop &
+	    -run agent -run init stop &
 
 monitor: all
 	cd $(BIN_PATH) && \
-  erl -name monitor -setcookie $(COOKIE) \
-      -run monitor
+	erl -name monitor -setcookie $(COOKIE) \
+	    -run monitor
 
