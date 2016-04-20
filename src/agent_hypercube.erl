@@ -1,4 +1,4 @@
--module(agent).
+-module(agent_hypercube).
 -export([network_create/1, node_join/1, test_network/1, test_join/0]).
 
 -record(topology, {id, nb_nodes, neighbours}).
