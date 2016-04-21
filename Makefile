@@ -1,5 +1,5 @@
 COOKIE = middleware
-NAME = node$$$$
+NAME = node$$$$@127.0.0.1
 
 SRC_PATH = ./src/
 BIN_PATH = ./bin/
