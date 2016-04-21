@@ -1,7 +1,7 @@
 -module(monitor).
 -export([ask_merge/2, ask_split/2, ask_job/4,
          ask_root/1, ask_graph/2, ask_ping/1,
-         test/1, start/0]).
+         test/1, start/0, stop/0]).
 
 % ================================ Utilities ================================= %
 
@@ -101,9 +101,10 @@ test(N) ->
 start() ->
   net_adm:world(),
   Pids = lists:map(fun(X) -> ask_root({agent,X}) end, nodes()),
-  Pid = lists:foldl(fun ask_merge/2, undefined, Pids),
-  global:register_name(agent, Pid),
-  ok.
+  case lists:foldl(fun ask_merge/2, undefined, Pids) of
+    undefined -> ok;
+    Pid -> global:register_name(agent, Pid), ok
+  end.
 
 stop() ->
   global:unregister_name(agent),
