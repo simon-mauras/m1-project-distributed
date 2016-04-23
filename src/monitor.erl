@@ -1,7 +1,9 @@
 -module(monitor).
--export([ask_merge/2, ask_split/2, ask_job/4,
-         ask_root/1, ask_graph/2, ask_ping/1,
-         test/1, start/0, stop/0]).
+-export([ask_merge/2, ask_split/2,
+         ask_job/4, ask_remove/2,
+         ask_root/1, ask_ping/1,
+         ask_graph/2, ask_say_hello/1,
+         test/1, start/0, stop/0, unique/1]).
 
 % ================================ Utilities ================================= %
 
@@ -11,6 +13,9 @@ spawns(0,_,_,_) -> [];
 spawns(N, Mod, Fun, Args) ->
   [ spawn(Mod, Fun, Args) | spawns(N-1, Mod, Fun, Args) ].
 
+unique([H,H|T]) -> unique([H|T]);
+unique([H|T]) -> [H|unique(T)];
+unique([]) -> [].
 
 % ================================ Monitoring ================================ %
 
@@ -30,7 +35,23 @@ ask_split(Pid, Threshold) ->
     { Pid1, Pid2 }
   end.
 
-ask_ping(Pid) -> Pid ! { ping }, ok.
+ask_remove(Pid, Id) ->
+  case ask_split(Pid, Id+1) of
+    { undefined, Res } ->
+      io:fwrite("Error: no node ~w~n", [Id]),
+      Res;
+    { Pid1, Pid2 } ->
+      { Pid3, Pid4 } = ask_split(Pid1, Id),
+      Pid4 ! { kill },
+      ask_merge(Pid3, Pid2)
+  end.
+  
+
+ask_say_hello(Pid) -> Pid ! { say_hello }, ok.
+
+ask_ping(Pid) ->
+  Pid ! { ping, { [], self() } },
+  receive { ping_end, Res } -> Res end.
 
 ask_graph(Pid, Filename) ->
   { ok, File } = file:open(Filename, [write]),
@@ -47,6 +68,10 @@ ask_root(Pid) ->
 ask_job(Pid, Module, Function, Args) ->
   Pid ! { job_new, { true, 1000, { Module, Function, Args, self() } } }.
 
+ask_kill(Pid) ->
+  Pids = ask_ping(Pid),
+  lists:map(fun(P) -> P ! {kill} end, Pids),
+  ok.
 
 % ================================== Test ==================================== %
 
@@ -74,33 +99,44 @@ test(N) ->
   ask_graph(Pid3, "graph2-2.dot"),
   % -------------------------------------------------------------------- %
   io:fwrite("Merging..."),
-  Pid = ask_merge(Pid2, Pid3),
+  Pid4 = ask_merge(Pid2, Pid3),
   io:fwrite(" Done!~n"),
+  % -------------------------------------------------------------------- %
+  io:fwrite("List of nodes:~n"),
+  io:fwrite("~w~n", [ask_ping(Pid4)]),
+  % -------------------------------------------------------------------- %
+  io:fwrite("Removing node ~w...", [N div 3]),
+  Pid5 = ask_remove(Pid4, N div 3),
+  io:fwrite(" Done!~n"),
+  % -------------------------------------------------------------------- %
+  io:fwrite("List of nodes:~n"),
+  io:fwrite("~w~n", [ask_ping(Pid5)]),
   % -------------------------------------------------------------------- %
   io:fwrite("Submitting jobs..."),
   Args = lists:map(fun (_) -> [1000] end, lists:seq(1, 10*N)),
-  lists:map(fun (Arg) -> ask_job(Pid2, jobs, wait, Arg) end, Args),
+  lists:map(fun (Arg) -> ask_job(Pid5, jobs, wait, Arg) end, Args),
   io:fwrite(" Done!~n"),
   % -------------------------------------------------------------------- %
   io:fwrite("Export graph3.dot~n"),
-  ask_graph(Pid, "graph3.dot"),
+  ask_graph(Pid5, "graph3.dot"),
   % -------------------------------------------------------------------- %
   io:fwrite("Waiting for the results..."),
   lists:map(fun (_) -> receive ok -> ok end end, Args),
   io:fwrite(" Done!~n"),
   % -------------------------------------------------------------------- %
   io:fwrite("Export graph4.dot~n"),
-  ask_graph(Pid, "graph4.dot"),
+  ask_graph(Pid5, "graph4.dot"),
   % -------------------------------------------------------------------- %
   io:fwrite("Killing agents..."),
-  lists:map(fun (P) -> P ! { kill } end, Pids),
+  ask_kill(Pid5),
   io:fwrite(" Done!~n"),
   % -------------------------------------------------------------------- %
   ok.
   
 start() ->
   net_adm:world(),
-  Pids = lists:map(fun(X) -> ask_root({agent,X}) end, nodes()),
+  PidsTmp = lists:map(fun(X) -> ask_root({agent,X}) end, nodes()),
+  Pids = unique(lists:sort(PidsTmp)),
   case lists:foldl(fun ask_merge/2, undefined, Pids) of
     undefined -> ok;
     Pid -> global:register_name(agent, Pid), ok

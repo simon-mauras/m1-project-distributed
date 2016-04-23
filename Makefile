@@ -20,6 +20,6 @@ agent: all
 
 monitor: all
 	cd $(BIN_PATH) && \
-	erl -name monitor -setcookie $(COOKIE) \
+	erl -name monitor$$$$ -setcookie $(COOKIE) \
 	    -run monitor
 

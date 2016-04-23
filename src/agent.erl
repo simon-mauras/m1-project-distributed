@@ -1,5 +1,5 @@
 -module(agent).
--export([node_init/1, start/0]).
+-export([node_init/0, node_init/1, start/0]).
 
 % ================================ Utilities ================================= %
 
@@ -37,6 +37,13 @@ node_root(Treap, Return) ->
     undefined -> Return ! { root_end, self() };
     Up -> Up ! { root, Return }
   end,
+  node_controller(Treap).
+
+% Say hello (debug)
+node_say_hello(Treap) ->
+  io:fwrite("Hi! I'm ~w(~w).~n", [self(), Treap#treap.value]),
+  case Treap#treap.left of undefined -> ok; PidL -> PidL ! { ping } end,
+  case Treap#treap.right of undefined -> ok; PidR -> PidR ! { ping } end,
   node_controller(Treap).
 
 % Spawn the next job.
@@ -131,7 +138,7 @@ node_split(Treap, { Threshold, UpLeft, UpRight, Return }) ->
     Meta -> Meta#meta.size
   end,
   case Threshold - Size - 1 of
-  X when X =< 0 ->
+  X when X < 0 ->
     case Treap#treap.left of
     undefined ->
       Return ! { split_end, undefined, self(), undefined, Treap#treap.meta },
@@ -149,7 +156,7 @@ node_split(Treap, { Threshold, UpLeft, UpRight, Return }) ->
         node_controller(NewTreap)
       end
     end;
-  X when X > 0 ->
+  X when X >= 0 ->
     case Treap#treap.right of
     undefined ->
       Return ! { split_end, self(), undefined, Treap#treap.meta, undefined },
@@ -220,12 +227,22 @@ node_merge(Treap, { Side, Pid, Up, Return }) ->
     end
   end.
 
-node_ping(Treap) ->
-  io:fwrite("Hi! I'm ~w(~w).~n", [self(), Treap#treap.value]),
-  case Treap#treap.left of undefined -> ok; PidL -> PidL ! { ping } end,
-  case Treap#treap.right of undefined -> ok; PidR -> PidR ! { ping } end,
+% Return the list of nodes of the treap
+node_ping(Treap, { Acc1, Return }) ->
+  Acc2 = case Treap#treap.left of
+    undefined -> Acc1;
+    PidL -> PidL ! { ping, { Acc1, self() } },
+            receive { ping_end, Res1 } -> Res1 end
+  end,
+  Acc3 = case Treap#treap.right of
+    undefined -> Acc2;
+    PidR -> PidR ! { ping, { Acc2, self() } },
+            receive { ping_end, Res2 } -> Res2 end
+  end,
+  Return ! { ping_end, [ self() | Acc3 ] },
   node_controller(Treap).
 
+% Print the topology in a dot file.
 node_graph(Treap, { File, Return }) ->
   io:fwrite(File, "~w [label=\"~w\\n~w\"];~n", [self(), self(), Treap#treap.meta]),
   case Treap#treap.up of
@@ -247,9 +264,11 @@ node_graph(Treap, { File, Return }) ->
   Return ! { graph_end },
   node_controller(Treap).
 
+% Branching function of the node.
 node_controller(Treap) ->
   receive
-    { ping } -> node_ping(Treap);
+    { say_hello } -> node_say_hello(Treap);
+    { ping, Data } -> node_ping(Treap, Data);
     { job_load, Data } -> node_job_load(Treap, Data);
     { job_new, Data } -> node_job_new(Treap, Data);
     { job_next, Data } -> node_job_next(Treap, Data);
@@ -260,6 +279,8 @@ node_controller(Treap) ->
     { kill } -> ok %io:fwrite("~w: I'm dead~n", [self()])
   end.
 
+% Init function (initialize the node as a treap of size 1)
+node_init() -> node_init(1).
 node_init(JobToken) ->
   %io:fwrite("~w: I'm alive~n", [self()]),
   init_seed(),

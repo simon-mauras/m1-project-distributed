@@ -16,7 +16,7 @@ If you want to run two independant instances of the middleware at the same time,
 
 ### Create hosts file
 
-Update the hosts file (```bin/.hosts.erlang```) according to the following syntax.
+Update the hosts file (```bin/.hosts.erlang```) using to the following syntax.
 ```
 '192.168.0.1'.
 '192.168.0.2'.
