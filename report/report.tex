@@ -9,7 +9,7 @@
 \usepackage{wrapfig}
 
 \usepackage{tikz}
-\usetikzlibrary{arrows,automata}
+\usetikzlibrary{shapes,arrows,automata}
 
 \title{M1 Project - Distributed Systems}
 \author{Simon Mauras}
@@ -146,6 +146,105 @@ We can now notice that with the assumption on the input of the merge function, v
 
 \section{Middle-ware}
 
+\subsection{Global overview}
+
+The organization of the project is the following. Source files are stored in the \verb|src| directory. The \verb|Makefile| can be used for the compilation and agent deployment. The python script \verb|slsu.py| can be use to extract hostnames from \verb|.hosts.erlang| and launch an agent on each of those nodes.
+
+\begin{verbatim}
++-- bin
+|   +-- .hosts.erlang
+|   +-- compiled files...
++-- src
+|   +-- agent.erl
+|   +-- jobs.erl
+|   +-- monitor.erl
++-- Makefile
++-- slsu.py
+\end{verbatim}
+
+\noindent The file \verb|agent.erl| contains all the internal functions used by the agents. We can describe an agent by a finite state machine. 
+
+
+\begin{figure}[h!]
+  \centering
+  \begin{tikzpicture}[node distance = 3.5cm, ->, >=stealth', bend angle=15, initial text={}]
+    \tikzset{state/.style={draw,rectangle}}
+    \node[initial,state] (init) {\verb|node_init|};
+    \node[state] (controller) [right of=init]             {\verb|node_controller|};
+    \node[state] (root)       [above left of=controller]  {\verb|node_root|};
+    \node[state] (ping)       [above of=controller]       {\verb|node_ping|};
+    \node[state] (job_next)   [above right of=controller] {\verb|node_job_next|};
+    \node[state] (job_load)   [right of=controller]       {\verb|node_job_load|};
+    \node[state] (job_new)    [below right of=controller] {\verb|node_job_new|};
+    \node[state] (split)      [below of=controller]       {\verb|node_split|};
+    \node[state] (merge)      [below left of=controller]  {\verb|node_merge|};
+    \path (controller) edge [bend left] (root)
+          (root)       edge [bend left] (controller)
+          (controller) edge [bend left] (ping)
+          (ping)       edge [bend left] (controller)
+          (controller) edge [bend left] (job_next)
+          (job_next)   edge [bend left] (controller)
+          (controller) edge [bend left] (job_new)
+          (job_new)    edge [bend left] (controller)
+          (controller) edge [bend left] (job_load)
+          (job_load)   edge [bend left] (controller)
+          (controller) edge [bend left] (split)
+          (split)      edge [bend left] (controller)
+          (controller) edge [bend left] (merge)
+          (merge)      edge [bend left] (controller)
+          (init)       edge             (controller);
+  \end{tikzpicture}
+  \caption{Finite State Machine describing an Agent.}
+\end{figure}
+
+\begin{itemize}
+	\item \verb|node_init| is the initialization state. 
+	\item \verb|node_controller| receives messages. It branch toward the state that handle the message that has just been received
+	\item \verb|node_root| send a message to the father of the node in order to return the root of the topoogy.
+	\item \verb|node_ping| sequentially send a message to the left child then to the right child in order to return a list of all the nodes of the topology (in postfix order)
+	\item \verb|node_job_next| is the function responsible to spawn a new process if a new job is received or if a job token is released.
+	\item \verb|node_job_load| is responsible to update upward the load value of the nodes. When one node finishes the execution of one job, the load value of its ancestors is updated
+	\item \verb|node_job_new| search for the best node on which execute a new job, taking into account the current load of each node of the topology.
+	\item \verb|node_split| handles the split operation.
+	\item \verb|node_merge| handles the merge operation.
+\end{itemize}
+
+\noindent The file \verb|monitor.erl| implements several interface function to manipulate the treap topology.
+\begin{itemize}
+	\item \verb|ask_merge(RootTreap1, RootTreap2)| merges two treaps.
+	\item \verb|ask_split(RootTreap, Rank)| split the treap according to the threshold. It returns two treaps, the first one having a size \verb|Rank| (if the threshold was valid).
+	\item \verb|ask_remove(RootTreap, Rank)| kills the process of rank \verb|Rank| and maintains a coherent topology.
+	\item \verb|ask_root(NodeTreap)| returns the identifier of the root of the treap in which \verb|NodeTreap| is.
+	\item \verb|ask_ping(RootTreap)| returns the list of all the identifiers of the nodes of the treap rooted in \verb|RootTreap|.
+	\item \verb|ask_job(RootTreap, Mod, Fun, Args)| submit one job in the topology. The process that called this function must expect to receive the return value of the job. As nodes at the top of the treap may forward a lot of jobs, a node can accept a job only if the size of its subtree is lower than a given threshold.
+	\item \verb|ask_kill(RootTreap)| kills all the nodes of the treap.
+	\item \verb|ask_graph(RootTreap, Filename)| exports a graph representing the topology (graphviz dot format)
+	\item \verb|ask_say_hello(RootTreap)| ask each node of the treap to say hello!
+\end{itemize}
+
+\subsection{Results}
+
+\subsubsection{Complexity}
+
+The complexity of the requests \verb|ask_ping|, \verb|ask_graph| and \verb|ask_kill| is linear in the size of the treap (the tree is traveled sequentially).
+The amortized complexity of all the other operations is logarithmic in the size of the treap.
+
+One particular case is when we perform several merge request consecutively. When the merging process is finished on one node and continues with one of its children, a new merge request can be started. The complexity of performing $N$ merge request on a treap of size $M$ is therefore $\mathcal O(N + \log M)$. It is also true when submitting $N$ jobs to a treap of size $M$.
+
+The amortized complexity to add one node to the topology or to submit one job is therefore constant.
+
+\subsubsection{Graphs}
+
+Here is an example of a graph we get when running our topology on 14 nodes of the SLSU cluster (using \verb|slsu.py| and \verb|monitor:ask_graph|).
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=11cm]{graph.pdf}
+\caption{Example of Graph}
+\end{figure}
+
+\newpage
+
 \subsection{Questions answered}
 
 Here is a quick summary of what we have implemented regarding to the questions asked in the project assignment.
@@ -178,7 +277,7 @@ Here is a quick summary of what we have implemented regarding to the questions a
 \paragraph{Going further}
 \begin{enumerate}[label=\alph*)]
   \item Have multiple monitors: just run \verb|make monitor| twice.
-  \item[d)] Merge and Split operations are useful if we want to use our middle-ware with several kinds of jobs (some time consuming jobs and a lot of fast jobs). Our voting process considers that jobs are all similar. If not, you can just split the network in two!
+  \item[d)] Merge and Split operations are useful if we want to use our middle-ware with several kinds of jobs (some time consuming jobs and a lot of fast jobs). Our voting process considers that jobs are all similar. If it is not the case, you can just split the network in two!
 \end{enumerate}
 
 \newpage
